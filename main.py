@@ -16,75 +16,30 @@ app.add_middleware(
 )
 
 def translate_with_google(text, from_lang, to_lang):
-    """Dùng MyMemory API (ổn định hơn)"""
+    """Dùng Google Translate API miễn phí"""
     try:
-        # Chuyển đổi mã ngôn ngữ
-        lang_map = {
-            "zh": "zh-CN",
-            "vi": "vi"
-        }
-        
-        url = "https://api.mymemory.translated.net/get"
+        url = "https://translate.googleapis.com/translate_a/single"
         params = {
-            "q": text,
-            "langpair": f"{lang_map.get(from_lang, from_lang)}|{lang_map.get(to_lang, to_lang)}",
-            "de": "a@b.com"  # Email dummy
+            "client": "gtx",
+            "sl": from_lang,
+            "tl": to_lang,
+            "dt": "t",
+            "q": text
         }
-        
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params)
         data = response.json()
         
         # Lấy bản dịch
-        translated = data.get("responseData", {}).get("translatedText", text)
+        translated = "".join([item[0] for item in data[0]])
         
-        # Xóa thẻ HTML nếu có
-        translated = re.sub(r'<[^>]+>', '', translated)
-        
-        # Xóa match rate nếu có (ví dụ: "hello (@14 @20)")
-        translated = re.sub(r'\s*\(@\d+\s+@\d+\)', '', translated)
-        
-        # Lấy pinyin cho tiếng Trung
+        # Lấy pinyin
         phonetic = ""
-        if to_lang == "zh" and translated and translated != text:
-            try:
-                phonetic = ' '.join([p[0] for p in pinyin(translated, style=Style.TONE)])
-            except:
-                phonetic = ""
-        
+        if len(data) > 1 and data[1]:
+            phonetic = data[1][0][0] if data[1] else ""
+            
         return translated, phonetic
-        
-    except Exception as e:
-        print(f"Lỗi MyMemory: {e}")
-        # Fallback: thử API khác
-        return translate_fallback(text, from_lang, to_lang)
-
-def translate_fallback(text, from_lang, to_lang):
-    """Fallback dùng Lingva (API ngầm của Google Translate)"""
-    try:
-        url = "https://lingva.ml/api/v1/translate"
-        params = {
-            "sl": from_lang,
-            "tl": to_lang,
-            "q": text
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        
-        translated = data.get("translation", text)
-        
-        phonetic = ""
-        if to_lang == "zh" and translated:
-            try:
-                phonetic = ' '.join([p[0] for p in pinyin(translated, style=Style.TONE)])
-            except:
-                phonetic = ""
-        
-        return translated, phonetic
-        
-    except Exception as e:
-        print(f"Lỗi fallback: {e}")
-        return f"[Lỗi] {text}", ""
+    except:
+        return "Lỗi dịch", ""
 
 @app.get("/translate")
 def translate(
@@ -94,8 +49,8 @@ def translate(
 ):
     translated, phonetic = translate_with_google(text, from_lang, to_lang)
     
-    # Nếu vẫn không có pinyin, tự sinh
-    if not phonetic and to_lang == "zh" and translated and translated != text:
+    # Nếu không có pinyin, tự sinh
+    if not phonetic and to_lang == "zh":
         try:
             phonetic = ' '.join([p[0] for p in pinyin(translated, style=Style.TONE)])
         except:
@@ -107,12 +62,37 @@ def translate(
         "phonetic": phonetic
     }
 
-@app.get("/test")
-def test():
-    """Endpoint test để kiểm tra API hoạt động"""
+# ✅ THÊM ENDPOINT NÀY CHO AUTO-TRANSLATE
+@app.get("/auto-translate")
+def auto_translate(
+    text: str
+):
+    """Tự động phát hiện ngôn ngữ và dịch ngược lại"""
+    # Phát hiện ngôn ngữ
+    has_chinese = any("\u4e00" <= c <= "\u9fff" for c in text)
+    has_vietnamese = any(c in "àáảãạâầấẩẫậăằắẳẵặêềếểễệđ" for c in text.lower())
+    
+    if has_chinese:
+        from_lang, to_lang = "zh", "vi"
+    elif has_vietnamese:
+        from_lang, to_lang = "vi", "zh"
+    else:
+        # Nếu không xác định được, mặc định coi là tiếng Việt
+        from_lang, to_lang = "vi", "zh"
+    
+    translated, phonetic = translate_with_google(text, from_lang, to_lang)
+    
+    if not phonetic and to_lang == "zh":
+        try:
+            phonetic = ' '.join([p[0] for p in pinyin(translated, style=Style.TONE)])
+        except:
+            phonetic = ""
+    
     return {
-        "status": "ok",
-        "message": "Server đang chạy, thử /translate?text=hello&from_lang=en&to_lang=vi"
+        "original": text,
+        "translated": translated,
+        "phonetic": phonetic,
+        "detected_from": from_lang
     }
 
 @app.get("/")
