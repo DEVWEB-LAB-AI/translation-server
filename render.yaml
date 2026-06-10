@@ -2,6 +2,13 @@ services:
   - type: web
     name: translation-server
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: apt-get install -y fonts-noto-cjk && pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
+    envVars:
+      - key: DATA_DIR
+        value: /data/translate_data
+    disk:
+      name: translate-data
+      mountPath: /data
+      sizeGB: 1

@@ -1,109 +1,134 @@
-# Translation Server v2.0 — Trung ↔ Việt + Pinyin
+# Translation Server v3.0 — Trung ↔ Việt + TTS + Lịch sử
 
 FastAPI backend deploy trên Render, phục vụ Android app dịch tài liệu Trung-Việt.
 
-## Tính năng mới (v2.0)
+## Tính năng
 
-| Tính năng | v1 | v2 |
+| Tính năng | v2 | v3 |
 |---|---|---|
-| Dịch văn bản dài | ❌ Lỗi nếu > vài trăm ký tự | ✅ Tự động chia đoạn ≤ 1000 ký tự |
-| Cache | ❌ Không có | ✅ File cache 7 ngày |
-| Fallback provider | ❌ Chỉ Google | ✅ Google → MyMemory → LibreTranslate |
-| Pinyin | ⚠️ Không chính xác theo ngữ cảnh | ✅ Dùng `heteronym=False` cho đúng âm |
-| Endpoint tài liệu | ❌ Không có | ✅ `POST /translate-doc` |
-| Validation | ❌ Không có | ✅ Giới hạn 10.000 ký tự, kiểm tra lỗi rõ |
-| Health check | ❌ Không có | ✅ `GET /health` |
+| Dịch văn bản dài (chunking) | ✅ | ✅ |
+| Cache 7 ngày | ✅ | ✅ |
+| Fallback 3 provider | ✅ | ✅ |
+| Pinyin chính xác | ✅ | ✅ |
+| **Phát âm TTS (Edge TTS)** | ❌ | ✅ Giọng tự nhiên Microsoft |
+| **Lịch sử dịch (SQLite)** | ❌ | ✅ Tìm kiếm, phân trang |
+| **Xuất PDF** | ❌ | ✅ Bảng song ngữ có màu |
+| **Xuất Word (.docx)** | ❌ | ✅ Bảng song ngữ có màu |
+
+> ⚠️ Render free tier dùng ephemeral storage — lịch sử và audio cache sẽ mất khi server restart.
+> Nâng lên Render Starter ($7/tháng) nếu cần giữ data lâu dài.
+
+---
 
 ## Endpoints
 
-### `GET /translate`
-Dịch có chỉ định ngôn ngữ.
+### Dịch
 ```
-GET /translate?text=你好&from_lang=zh&to_lang=vi
-```
-Response:
-```json
-{
-  "original": "你好",
-  "translated": "Xin chào",
-  "phonetic": "nǐ hǎo",
-  "provider": "google",
-  "chunks": 1,
-  "from_cache": false
-}
+GET  /translate?text=你好&from_lang=zh&to_lang=vi
+GET  /auto-translate?text=Xin chào bạn
+POST /translate-doc        body: {"text":"...","from_lang":"vi","to_lang":"zh"}
+GET  /pinyin?text=学习中文
 ```
 
-### `GET /auto-translate`
-Tự động phát hiện ngôn ngữ.
+### Phát âm (TTS)
 ```
-GET /auto-translate?text=Xin chào bạn
+GET /tts?text=你好世界&lang=zh
+GET /tts?text=Xin chào&lang=vi
 ```
+Trả về file MP3. Android dùng `MediaPlayer` hoặc download bytes.
 
-### `POST /translate-doc`
-**Dùng cho tài liệu dài từ Android.** Nhận JSON body, hỗ trợ đến 10.000 ký tự.
-```json
-POST /translate-doc
-{
-  "text": "văn bản dài...",
-  "from_lang": "vi",
-  "to_lang": "zh"
-}
-```
+**Giọng đọc:**
+- Tiếng Trung: `zh-CN-XiaoxiaoNeural` (giọng nữ, tự nhiên nhất)
+- Tiếng Việt: `vi-VN-HoaiMyNeural` (giọng nữ)
 
-### `GET /pinyin`
-Chỉ lấy pinyin, không dịch.
+### Lịch sử
 ```
-GET /pinyin?text=学习中文很有趣
+GET    /history?limit=50&offset=0&lang=zh&search=xin chào
+DELETE /history/{id}      # Xóa 1 mục
+DELETE /history            # Xóa tất cả
 ```
 
-### `GET /health`
-Kiểm tra server đang chạy (dùng cho Render health check).
+### Xuất file
+```
+GET /export/pdf?limit=200&search=
+GET /export/docx?limit=200&search=
+```
 
-### `DELETE /cache`
-Xóa cache (khi debug).
+### Tiện ích
+```
+GET    /health
+DELETE /cache
+```
 
-## Deploy lên Render
+---
 
-### Environment Variables (tùy chọn)
-| Biến | Giá trị | Mục đích |
-|---|---|---|
-| `LIBRE_TRANSLATE_URL` | `https://your-libretranslate.com` | Provider thứ 3 nếu muốn |
-
-### render.yaml đã cấu hình sẵn health check path `/health`.
-
-## Gọi từ Android (Kotlin/Retrofit)
+## Gọi từ Android (Kotlin)
 
 ```kotlin
-// Tài liệu dài dùng POST
-@POST("translate-doc")
-suspend fun translateDoc(@Body body: TranslateRequest): TranslateResponse
-
-data class TranslateRequest(
-    val text: String,
-    val from_lang: String,
-    val to_lang: String
-)
-
-// Câu ngắn dùng GET
+// Dịch
 @GET("auto-translate")
 suspend fun autoTranslate(@Query("text") text: String): TranslateResponse
+
+// Phát âm — tải MP3 về rồi play
+@GET("tts")
+@Streaming
+suspend fun getTTS(
+    @Query("text") text: String,
+    @Query("lang") lang: String
+): ResponseBody
+
+// Lịch sử
+@GET("history")
+suspend fun getHistory(
+    @Query("limit") limit: Int = 50,
+    @Query("offset") offset: Int = 0,
+    @Query("search") search: String = ""
+): HistoryResponse
+
+// Xuất file
+@GET("export/pdf")
+@Streaming
+suspend fun exportPDF(@Query("limit") limit: Int = 200): ResponseBody
 ```
 
-## Kiến trúc fallback
+**Ví dụ play TTS trên Android:**
+```kotlin
+val url = "https://your-server.onrender.com/tts?text=你好&lang=zh"
+val mediaPlayer = MediaPlayer().apply {
+    setDataSource(url)
+    setAudioAttributes(AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build())
+    prepareAsync()
+    setOnPreparedListener { start() }
+}
+```
+
+---
+
+## Deploy Render
+
+`render.yaml` đã cấu hình tự động cài font CJK (`fonts-noto-cjk`) để PDF hiển thị đúng chữ Trung/Việt.
+
+### Environment Variables (tùy chọn)
+| Biến | Mục đích |
+|---|---|
+| `LIBRE_TRANSLATE_URL` | Provider dịch thứ 3 |
+
+---
+
+## Kiến trúc
 
 ```
-Request
-  └─► Cache hit? ──► Trả ngay (0ms)
-        │
-        ▼ Cache miss
-      Google Translate
-        │ Lỗi/chặn?
-        ▼
-      MyMemory API (5000 ký tự/ngày miễn phí)
-        │ Lỗi?
-        ▼
-      LibreTranslate (nếu cấu hình)
-        │
-        ▼
-      Lưu cache 7 ngày
+Android Request
+  │
+  ├─► /tts        → Edge TTS (Microsoft Neural) → MP3 stream
+  │
+  ├─► /translate  → Cache? → Google/MyMemory/Libre → SQLite history
+  │
+  ├─► /history    → SQLite query (filter/search/paginate)
+  │
+  └─► /export/pdf  → SQLite → fpdf2 → PDF download
+      /export/docx → SQLite → python-docx → DOCX download
 ```
