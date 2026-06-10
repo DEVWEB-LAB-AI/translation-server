@@ -6,3 +6,4 @@ python-multipart
 edge-tts
 fpdf2
 python-docx
+fonttools
