@@ -7,3 +7,4 @@ edge-tts
 fpdf2
 python-docx
 fonttools
+psycopg2-binary
